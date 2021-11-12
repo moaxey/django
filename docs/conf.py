@@ -107,7 +107,7 @@ copyright = 'Django Software Foundation and contributors'
 # built documents.
 #
 # The short X.Y version.
-version = '4.0'
+version = '4.1'
 # The full version, including alpha/beta/rc tags.
 try:
     from django import VERSION, get_version
@@ -123,7 +123,7 @@ else:
     release = django_release()
 
 # The "development version" of Django
-django_next_version = '4.0'
+django_next_version = '4.1'
 
 extlinks = {
     'bpo': ('https://bugs.python.org/issue%s', 'bpo-'),
@@ -272,13 +272,35 @@ rst_epilog = """
 
 # -- Options for LaTeX output --------------------------------------------------
 
+# Use lualatex for Unicode support.
+latex_engine = 'lualatex'
+# Set fonts and fallbacks for CJK and Emojis.
 latex_elements = {
-    'preamble': (
-        '\\DeclareUnicodeCharacter{2264}{\\ensuremath{\\le}}'
-        '\\DeclareUnicodeCharacter{2265}{\\ensuremath{\\ge}}'
-        '\\DeclareUnicodeCharacter{2665}{[unicode-heart]}'
-        '\\DeclareUnicodeCharacter{2713}{[unicode-checkmark]}'
-    ),
+    'preamble': r"""
+        \directlua{
+            luaotfload.add_fallback("seriffallbacks", {
+                "Noto Serif CJK SC:style=Regular;",
+                "Symbola:Style=Regular;"
+            })
+        }
+        \setmainfont{FreeSerif}[RawFeature={fallback=seriffallbacks}]
+
+        \directlua{
+            luaotfload.add_fallback("sansfallbacks", {
+                "Noto Sans CJK SC:style=Regular;",
+                "Symbola:Style=Regular;"
+            })
+        }
+        \setsansfont{FreeSans}[RawFeature={fallback=sansfallbacks}]
+
+        \directlua{
+            luaotfload.add_fallback("monofallbacks", {
+                "Noto Sans Mono CJK SC:style=Regular;",
+                "Symbola:Style=Regular;"
+            })
+        }
+        \setmonofont{FreeMono}[RawFeature={fallback=monofallbacks}]
+    """,
 }
 
 # Grouping the document tree into LaTeX files. List of tuples

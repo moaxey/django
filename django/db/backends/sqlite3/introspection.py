@@ -115,7 +115,7 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
     def get_relations(self, cursor, table_name):
         """
         Return a dictionary of {field_name: (field_name_other_table, other_table)}
-        representing all relationships to the given table.
+        representing all foreign keys in the given table.
         """
         # Dictionary of relations to return
         relations = {}
@@ -170,56 +170,14 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
 
         return relations
 
-    def get_key_columns(self, cursor, table_name):
-        """
-        Return a list of (column_name, referenced_table_name, referenced_column_name)
-        for all key columns in given table.
-        """
-        key_columns = []
-
-        # Schema for this table
-        cursor.execute("SELECT sql FROM sqlite_master WHERE tbl_name = %s AND type = %s", [table_name, "table"])
-        results = cursor.fetchone()[0].strip()
-        results = results[results.index('(') + 1:results.rindex(')')]
-
-        # Walk through and look for references to other tables. SQLite doesn't
-        # really have enforced references, but since it echoes out the SQL used
-        # to create the table we can look for REFERENCES statements used there.
-        for field_index, field_desc in enumerate(results.split(',')):
-            field_desc = field_desc.strip()
-            if field_desc.startswith("UNIQUE"):
-                continue
-
-            m = re.search(r'"(.*)".*references (.*) \(["|](.*)["|]\)', field_desc, re.I)
-            if not m:
-                continue
-
-            # This will append (column_name, referenced_table_name, referenced_column_name) to key_columns
-            key_columns.append(tuple(s.strip('"') for s in m.groups()))
-
-        return key_columns
-
     def get_primary_key_column(self, cursor, table_name):
         """Return the column name of the primary key for the given table."""
-        # Don't use PRAGMA because that causes issues with some transactions
         cursor.execute(
-            "SELECT sql, type FROM sqlite_master "
-            "WHERE tbl_name = %s AND type IN ('table', 'view')",
-            [table_name]
+            'PRAGMA table_info(%s)' % self.connection.ops.quote_name(table_name)
         )
-        row = cursor.fetchone()
-        if row is None:
-            raise ValueError("Table %s does not exist" % table_name)
-        create_sql, table_type = row
-        if table_type == 'view':
-            # Views don't have a primary key.
-            return None
-        fields_sql = create_sql[create_sql.index('(') + 1:create_sql.rindex(')')]
-        for field_desc in fields_sql.split(','):
-            field_desc = field_desc.strip()
-            m = re.match(r'(?:(?:["`\[])(.*)(?:["`\]])|(\w+)).*PRIMARY KEY.*', field_desc)
-            if m:
-                return m[1] if m[1] else m[2]
+        for _, name, *_, pk in cursor.fetchall():
+            if pk:
+                return name
         return None
 
     def _get_foreign_key_constraints(self, cursor, table_name):

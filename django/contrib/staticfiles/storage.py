@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 import posixpath
@@ -10,6 +9,7 @@ from django.contrib.staticfiles.utils import check_settings, matches_patterns
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage, get_storage_class
+from django.utils.crypto import md5
 from django.utils.functional import LazyObject
 
 
@@ -54,18 +54,9 @@ class HashedFilesMixin:
         )),
         ('*.js', (
             (
-                r'(?P<matched>)^(//# (?-i:sourceMappingURL)=(?P<url>.*))$',
+                r'(?m)(?P<matched>)^(//# (?-i:sourceMappingURL)=(?P<url>.*))$',
                 '//# sourceMappingURL=%(url)s',
             ),
-            (
-                r"""(?P<matched>import\s+(?s:(?P<imports>.*?))\s*from\s*["'](?P<url>.*?)["'])""",
-                'import %(imports)s from "%(url)s"',
-            ),
-            (
-                r"""(?P<matched>export\s+(?s:(?P<exports>.*?))\s*from\s*["'](?P<url>.*?)["'])""",
-                'export %(exports)s from "%(url)s"',
-            ),
-            (r"""(?P<matched>import\(["'](?P<url>.*?)["']\))""", 'import("%(url)s")'),
         )),
     )
     keep_intermediate_files = True
@@ -89,10 +80,10 @@ class HashedFilesMixin:
         """
         if content is None:
             return None
-        md5 = hashlib.md5()
+        hasher = md5(usedforsecurity=False)
         for chunk in content.chunks():
-            md5.update(chunk)
-        return md5.hexdigest()[:12]
+            hasher.update(chunk)
+        return hasher.hexdigest()[:12]
 
     def hashed_name(self, name, content=None, filename=None):
         # `filename` is the name of file to hash if `content` isn't given.

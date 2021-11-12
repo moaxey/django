@@ -213,7 +213,7 @@ class GenericForeignKey(FieldCacheMixin):
             gfk_key,
             True,
             self.name,
-            True,
+            False,
         )
 
     def __get__(self, instance, cls=None):
@@ -229,6 +229,8 @@ class GenericForeignKey(FieldCacheMixin):
         pk_val = getattr(instance, self.fk_field)
 
         rel_obj = self.get_cached_value(instance, default=None)
+        if rel_obj is None and self.is_cached(instance):
+            return rel_obj
         if rel_obj is not None:
             ct_match = ct_id == self.get_content_type(obj=rel_obj, using=instance._state.db).id
             pk_match = rel_obj._meta.pk.to_python(pk_val) == rel_obj.pk
@@ -393,7 +395,7 @@ class GenericRelation(ForeignObject):
             opts = field.remote_field.model._meta
         parent_field_chain.reverse()
         for field in parent_field_chain:
-            path.extend(field.remote_field.get_path_info())
+            path.extend(field.remote_field.path_infos)
         return path
 
     def get_path_info(self, filtered_relation=None):
@@ -502,6 +504,14 @@ class ReverseGenericManyToOneDescriptor(ReverseManyToOneDescriptor):
             self.rel.model._default_manager.__class__,
             self.rel,
         )
+
+    @cached_property
+    def related_manager_cache_key(self):
+        # By default, GenericRel instances will be marked as hidden unless
+        # related_query_name is given (their accessor name being "+" when
+        # hidden), which would cause multiple GenericRelations declared on a
+        # single model to collide, so always use the remote field's name.
+        return self.field.get_cache_name()
 
 
 def create_generic_related_manager(superclass, rel):

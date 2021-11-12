@@ -242,7 +242,9 @@ class RelatedField(FieldCacheMixin, Field):
             if not rel_is_hidden and clash_field.name == rel_name:
                 errors.append(
                     checks.Error(
-                        "Reverse accessor for '%s' clashes with field name '%s'." % (field_name, clash_name),
+                        f"Reverse accessor '{rel_opts.object_name}.{rel_name}' "
+                        f"for '{field_name}' clashes with field name "
+                        f"'{clash_name}'.",
                         hint=("Rename field '%s', or add/change a related_name "
                               "argument to the definition for field '%s'.") % (clash_name, field_name),
                         obj=self,
@@ -274,7 +276,9 @@ class RelatedField(FieldCacheMixin, Field):
             if not rel_is_hidden and clash_field.get_accessor_name() == rel_name:
                 errors.append(
                     checks.Error(
-                        "Reverse accessor for '%s' clashes with reverse accessor for '%s'." % (field_name, clash_name),
+                        f"Reverse accessor '{rel_opts.object_name}.{rel_name}' "
+                        f"for '{field_name}' clashes with reverse accessor for "
+                        f"'{clash_name}'.",
                         hint=("Add or change a related_name argument "
                               "to the definition for '%s' or '%s'.") % (field_name, clash_name),
                         obj=self,
@@ -446,7 +450,7 @@ class RelatedField(FieldCacheMixin, Field):
         When filtering against this relation, return the field on the remote
         model against which the filtering should happen.
         """
-        target_fields = self.get_path_info()[-1].target_fields
+        target_fields = self.path_infos[-1].target_fields
         if len(target_fields) > 1:
             raise exceptions.FieldError(
                 "The relation has multiple target fields, but only single target field was asked for")
@@ -497,6 +501,13 @@ class ForeignObject(RelatedField):
         self.from_fields = from_fields
         self.to_fields = to_fields
         self.swappable = swappable
+
+    def __copy__(self):
+        obj = super().__copy__()
+        # Remove any cached PathInfo values.
+        obj.__dict__.pop('path_infos', None)
+        obj.__dict__.pop('reverse_path_infos', None)
+        return obj
 
     def check(self, **kwargs):
         return [
@@ -742,6 +753,10 @@ class ForeignObject(RelatedField):
             filtered_relation=filtered_relation,
         )]
 
+    @cached_property
+    def path_infos(self):
+        return self.get_path_info()
+
     def get_reverse_path_info(self, filtered_relation=None):
         """Get path from the related model to this field's model."""
         opts = self.model._meta
@@ -755,6 +770,10 @@ class ForeignObject(RelatedField):
             direct=False,
             filtered_relation=filtered_relation,
         )]
+
+    @cached_property
+    def reverse_path_infos(self):
+        return self.get_reverse_path_info()
 
     @classmethod
     @functools.lru_cache(maxsize=None)
@@ -1301,17 +1320,6 @@ class ManyToManyField(RelatedField):
                     id='fields.W341',
                 )
             )
-        if (self.remote_field.limit_choices_to and self.remote_field.through and
-                not self.remote_field.through._meta.auto_created):
-            warnings.append(
-                checks.Warning(
-                    'limit_choices_to has no effect on ManyToManyField '
-                    'with a through model.',
-                    obj=self,
-                    id='fields.W343',
-                )
-            )
-
         if self.remote_field.symmetrical and self._related_name:
             warnings.append(
                 checks.Warning(
@@ -1602,12 +1610,17 @@ class ManyToManyField(RelatedField):
         linkfield1 = int_model._meta.get_field(self.m2m_field_name())
         linkfield2 = int_model._meta.get_field(self.m2m_reverse_field_name())
         if direct:
-            join1infos = linkfield1.get_reverse_path_info()
-            join2infos = linkfield2.get_path_info(filtered_relation)
+            join1infos = linkfield1.reverse_path_infos
+            if filtered_relation:
+                join2infos = linkfield2.get_path_info(filtered_relation)
+            else:
+                join2infos = linkfield2.path_infos
         else:
-            join1infos = linkfield2.get_reverse_path_info()
-            join2infos = linkfield1.get_path_info(filtered_relation)
-
+            join1infos = linkfield2.reverse_path_infos
+            if filtered_relation:
+                join2infos = linkfield1.get_path_info(filtered_relation)
+            else:
+                join2infos = linkfield1.path_infos
         # Get join infos between the last model of join 1 and the first model
         # of join 2. Assume the only reason these may differ is due to model
         # inheritance.
@@ -1625,8 +1638,16 @@ class ManyToManyField(RelatedField):
     def get_path_info(self, filtered_relation=None):
         return self._get_path_info(direct=True, filtered_relation=filtered_relation)
 
+    @cached_property
+    def path_infos(self):
+        return self.get_path_info()
+
     def get_reverse_path_info(self, filtered_relation=None):
         return self._get_path_info(direct=False, filtered_relation=filtered_relation)
+
+    @cached_property
+    def reverse_path_infos(self):
+        return self.get_reverse_path_info()
 
     def _get_m2m_db_table(self, opts):
         """

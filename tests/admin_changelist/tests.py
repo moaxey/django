@@ -513,6 +513,57 @@ class ChangeListTests(TestCase):
         cl.queryset.delete()
         self.assertEqual(cl.queryset.count(), 0)
 
+    def test_multiple_search_fields(self):
+        """
+        All rows containing each of the searched words are returned, where each
+        word must be in one of search_fields.
+        """
+        band_duo = Group.objects.create(name='Duo')
+        band_hype = Group.objects.create(name='The Hype')
+        mary = Musician.objects.create(name='Mary Halvorson')
+        jonathan = Musician.objects.create(name='Jonathan Finlayson')
+        band_duo.members.set([mary, jonathan])
+        Concert.objects.create(name='Tiny desk concert', group=band_duo)
+        Concert.objects.create(name='Woodstock concert', group=band_hype)
+        # FK lookup.
+        concert_model_admin = ConcertAdmin(Concert, custom_site)
+        concert_model_admin.search_fields = ['group__name', 'name']
+        # Reverse FK lookup.
+        group_model_admin = GroupAdmin(Group, custom_site)
+        group_model_admin.search_fields = ['name', 'concert__name', 'members__name']
+        for search_string, result_count in (
+            ('Duo Concert', 1),
+            ('Tiny Desk Concert', 1),
+            ('Concert', 2),
+            ('Other Concert', 0),
+            ('Duo Woodstock', 0),
+        ):
+            with self.subTest(search_string=search_string):
+                # FK lookup.
+                request = self.factory.get('/concert/', data={SEARCH_VAR: search_string})
+                request.user = self.superuser
+                concert_changelist = concert_model_admin.get_changelist_instance(request)
+                self.assertEqual(concert_changelist.queryset.count(), result_count)
+                # Reverse FK lookup.
+                request = self.factory.get('/group/', data={SEARCH_VAR: search_string})
+                request.user = self.superuser
+                group_changelist = group_model_admin.get_changelist_instance(request)
+                self.assertEqual(group_changelist.queryset.count(), result_count)
+        # Many-to-many lookup.
+        for search_string, result_count in (
+            ('Finlayson Duo Tiny', 1),
+            ('Finlayson', 1),
+            ('Finlayson Hype', 0),
+            ('Jonathan Finlayson Duo', 1),
+            ('Mary Jonathan Duo', 1),
+            ('Oscar Finlayson Duo', 0),
+        ):
+            with self.subTest(search_string=search_string):
+                request = self.factory.get('/group/', data={SEARCH_VAR: search_string})
+                request.user = self.superuser
+                group_changelist = group_model_admin.get_changelist_instance(request)
+                self.assertEqual(group_changelist.queryset.count(), result_count)
+
     def test_pk_in_search_fields(self):
         band = Group.objects.create(name='The Hype')
         Concert.objects.create(name='Woodstock', group=band)
@@ -1412,23 +1463,27 @@ class SeleniumTests(AdminSeleniumTestCase):
         """
         The status line for selected rows gets updated correctly (#22038).
         """
+        from selenium.webdriver.common.by import By
         self.admin_login(username='super', password='secret')
         self.selenium.get(self.live_server_url + reverse('admin:auth_user_changelist'))
 
         form_id = '#changelist-form'
 
         # Test amount of rows in the Changelist
-        rows = self.selenium.find_elements_by_css_selector(
+        rows = self.selenium.find_elements(
+            By.CSS_SELECTOR,
             '%s #result_list tbody tr' % form_id
         )
         self.assertEqual(len(rows), 1)
         row = rows[0]
 
-        selection_indicator = self.selenium.find_element_by_css_selector(
+        selection_indicator = self.selenium.find_element(
+            By.CSS_SELECTOR,
             '%s .action-counter' % form_id
         )
-        all_selector = self.selenium.find_element_by_id('action-toggle')
-        row_selector = self.selenium.find_element_by_css_selector(
+        all_selector = self.selenium.find_element(By.ID, 'action-toggle')
+        row_selector = self.selenium.find_element(
+            By.CSS_SELECTOR,
             '%s #result_list tbody tr:first-child .action-select' % form_id
         )
 
@@ -1455,12 +1510,13 @@ class SeleniumTests(AdminSeleniumTestCase):
         should select all rows in-between.
         """
         from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.by import By
         from selenium.webdriver.common.keys import Keys
 
         Parent.objects.bulk_create([Parent(name='parent%d' % i) for i in range(5)])
         self.admin_login(username='super', password='secret')
         self.selenium.get(self.live_server_url + reverse('admin:admin_changelist_parent_changelist'))
-        checkboxes = self.selenium.find_elements_by_css_selector('tr input.action-select')
+        checkboxes = self.selenium.find_elements(By.CSS_SELECTOR, 'tr input.action-select')
         self.assertEqual(len(checkboxes), 5)
         for c in checkboxes:
             self.assertIs(c.get_property('checked'), False)
@@ -1472,21 +1528,23 @@ class SeleniumTests(AdminSeleniumTestCase):
         self.assertIs(checkboxes[-1].get_property('checked'), False)
 
     def test_select_all_across_pages(self):
+        from selenium.webdriver.common.by import By
         Parent.objects.bulk_create([Parent(name='parent%d' % i) for i in range(101)])
         self.admin_login(username='super', password='secret')
         self.selenium.get(self.live_server_url + reverse('admin:admin_changelist_parent_changelist'))
 
-        selection_indicator = self.selenium.find_element_by_css_selector('.action-counter')
-        select_all_indicator = self.selenium.find_element_by_css_selector('.actions .all')
-        question = self.selenium.find_element_by_css_selector('.actions > .question')
-        clear = self.selenium.find_element_by_css_selector('.actions > .clear')
-        select_all = self.selenium.find_element_by_id('action-toggle')
-        select_across = self.selenium.find_element_by_name('select_across')
+        selection_indicator = self.selenium.find_element(By.CSS_SELECTOR, '.action-counter')
+        select_all_indicator = self.selenium.find_element(By.CSS_SELECTOR, '.actions .all')
+        question = self.selenium.find_element(By.CSS_SELECTOR, '.actions > .question')
+        clear = self.selenium.find_element(By.CSS_SELECTOR, '.actions > .clear')
+        select_all = self.selenium.find_element(By.ID, 'action-toggle')
+        select_across = self.selenium.find_elements(By.NAME, 'select_across')
 
         self.assertIs(question.is_displayed(), False)
         self.assertIs(clear.is_displayed(), False)
         self.assertIs(select_all.get_property('checked'), False)
-        self.assertEqual(select_across.get_property('value'), '0')
+        for hidden_input in select_across:
+            self.assertEqual(hidden_input.get_property('value'), '0')
         self.assertIs(selection_indicator.is_displayed(), True)
         self.assertEqual(selection_indicator.text, '0 of 100 selected')
         self.assertIs(select_all_indicator.is_displayed(), False)
@@ -1495,7 +1553,8 @@ class SeleniumTests(AdminSeleniumTestCase):
         self.assertIs(question.is_displayed(), True)
         self.assertIs(clear.is_displayed(), False)
         self.assertIs(select_all.get_property('checked'), True)
-        self.assertEqual(select_across.get_property('value'), '0')
+        for hidden_input in select_across:
+            self.assertEqual(hidden_input.get_property('value'), '0')
         self.assertIs(selection_indicator.is_displayed(), True)
         self.assertEqual(selection_indicator.text, '100 of 100 selected')
         self.assertIs(select_all_indicator.is_displayed(), False)
@@ -1504,7 +1563,8 @@ class SeleniumTests(AdminSeleniumTestCase):
         self.assertIs(question.is_displayed(), False)
         self.assertIs(clear.is_displayed(), True)
         self.assertIs(select_all.get_property('checked'), True)
-        self.assertEqual(select_across.get_property('value'), '1')
+        for hidden_input in select_across:
+            self.assertEqual(hidden_input.get_property('value'), '1')
         self.assertIs(selection_indicator.is_displayed(), False)
         self.assertIs(select_all_indicator.is_displayed(), True)
 
@@ -1512,22 +1572,24 @@ class SeleniumTests(AdminSeleniumTestCase):
         self.assertIs(question.is_displayed(), False)
         self.assertIs(clear.is_displayed(), False)
         self.assertIs(select_all.get_property('checked'), False)
-        self.assertEqual(select_across.get_property('value'), '0')
+        for hidden_input in select_across:
+            self.assertEqual(hidden_input.get_property('value'), '0')
         self.assertIs(selection_indicator.is_displayed(), True)
         self.assertEqual(selection_indicator.text, '0 of 100 selected')
         self.assertIs(select_all_indicator.is_displayed(), False)
 
     def test_actions_warn_on_pending_edits(self):
+        from selenium.webdriver.common.by import By
         Parent.objects.create(name='foo')
 
         self.admin_login(username='super', password='secret')
         self.selenium.get(self.live_server_url + reverse('admin:admin_changelist_parent_changelist'))
 
-        name_input = self.selenium.find_element_by_id('id_form-0-name')
+        name_input = self.selenium.find_element(By.ID, 'id_form-0-name')
         name_input.clear()
         name_input.send_keys('bar')
-        self.selenium.find_element_by_id('action-toggle').click()
-        self.selenium.find_element_by_name('index').click()  # Go
+        self.selenium.find_element(By.ID, 'action-toggle').click()
+        self.selenium.find_element(By.NAME, 'index').click()  # Go
         alert = self.selenium.switch_to.alert
         try:
             self.assertEqual(
@@ -1539,6 +1601,7 @@ class SeleniumTests(AdminSeleniumTestCase):
             alert.dismiss()
 
     def test_save_with_changes_warns_on_pending_action(self):
+        from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import Select
 
         Parent.objects.create(name='parent')
@@ -1546,13 +1609,13 @@ class SeleniumTests(AdminSeleniumTestCase):
         self.admin_login(username='super', password='secret')
         self.selenium.get(self.live_server_url + reverse('admin:admin_changelist_parent_changelist'))
 
-        name_input = self.selenium.find_element_by_id('id_form-0-name')
+        name_input = self.selenium.find_element(By.ID, 'id_form-0-name')
         name_input.clear()
         name_input.send_keys('other name')
         Select(
-            self.selenium.find_element_by_name('action')
+            self.selenium.find_element(By.NAME, 'action')
         ).select_by_value('delete_selected')
-        self.selenium.find_element_by_name('_save').click()
+        self.selenium.find_element(By.NAME, '_save').click()
         alert = self.selenium.switch_to.alert
         try:
             self.assertEqual(
@@ -1565,6 +1628,7 @@ class SeleniumTests(AdminSeleniumTestCase):
             alert.dismiss()
 
     def test_save_without_changes_warns_on_pending_action(self):
+        from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import Select
 
         Parent.objects.create(name='parent')
@@ -1573,9 +1637,9 @@ class SeleniumTests(AdminSeleniumTestCase):
         self.selenium.get(self.live_server_url + reverse('admin:admin_changelist_parent_changelist'))
 
         Select(
-            self.selenium.find_element_by_name('action')
+            self.selenium.find_element(By.NAME, 'action')
         ).select_by_value('delete_selected')
-        self.selenium.find_element_by_name('_save').click()
+        self.selenium.find_element(By.NAME, '_save').click()
         alert = self.selenium.switch_to.alert
         try:
             self.assertEqual(

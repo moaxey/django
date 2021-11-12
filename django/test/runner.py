@@ -1,7 +1,6 @@
 import argparse
 import ctypes
 import faulthandler
-import hashlib
 import io
 import itertools
 import logging
@@ -26,6 +25,7 @@ from django.test.utils import (
     setup_databases as _setup_databases, setup_test_environment,
     teardown_databases as _teardown_databases, teardown_test_environment,
 )
+from django.utils.crypto import new_hash
 from django.utils.datastructures import OrderedSet
 from django.utils.deprecation import RemovedInDjango50Warning
 
@@ -106,6 +106,11 @@ class PDBDebugResult(unittest.TextTestResult):
     def addFailure(self, test, err):
         super().addFailure(test, err)
         self.debug(err)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None:
+            self.debug(err)
+        super().addSubTest(test, subtest, err)
 
     def debug(self, error):
         self._restoreStdout()
@@ -504,7 +509,7 @@ class Shuffler:
 
     @classmethod
     def _hash_text(cls, text):
-        h = hashlib.new(cls.hash_algorithm)
+        h = new_hash(cls.hash_algorithm, usedforsecurity=False)
         h.update(text.encode('utf-8'))
         return h.hexdigest()
 
@@ -561,7 +566,7 @@ class DiscoverRunner:
                  reverse=False, debug_mode=False, debug_sql=False, parallel=0,
                  tags=None, exclude_tags=None, test_name_patterns=None,
                  pdb=False, buffer=False, enable_faulthandler=True,
-                 timing=False, shuffle=False, **kwargs):
+                 timing=False, shuffle=False, logger=None, **kwargs):
 
         self.pattern = pattern
         self.top_level = top_level
@@ -595,6 +600,7 @@ class DiscoverRunner:
             }
         self.shuffle = shuffle
         self._shuffler = None
+        self.logger = logger
 
     @classmethod
     def add_arguments(cls, parser):
@@ -677,16 +683,23 @@ class DiscoverRunner:
 
     def log(self, msg, level=None):
         """
-        Log the given message at the given logging level.
+        Log the message at the given logging level (the default is INFO).
 
-        A verbosity of 1 logs INFO (the default level) or above, and verbosity
-        2 or higher logs all levels.
+        If a logger isn't set, the message is instead printed to the console,
+        respecting the configured verbosity. A verbosity of 0 prints no output,
+        a verbosity of 1 prints INFO and above, and a verbosity of 2 or higher
+        prints all levels.
         """
-        if self.verbosity <= 0 or (
-            self.verbosity == 1 and level is not None and level < logging.INFO
-        ):
-            return
-        print(msg)
+        if level is None:
+            level = logging.INFO
+        if self.logger is None:
+            if self.verbosity <= 0 or (
+                self.verbosity == 1 and level < logging.INFO
+            ):
+                return
+            print(msg)
+        else:
+            self.logger.log(level, msg)
 
     def setup_test_environment(self, **kwargs):
         setup_test_environment(debug=self.debug_mode)
@@ -862,7 +875,7 @@ class DiscoverRunner:
         teardown_test_environment()
 
     def suite_result(self, suite, result, **kwargs):
-        return len(result.failures) + len(result.errors)
+        return len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses)
 
     def _get_databases(self, suite):
         databases = {}

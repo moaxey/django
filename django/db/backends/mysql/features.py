@@ -24,7 +24,6 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     supports_select_difference = False
     supports_slicing_ordering_in_compound = True
     supports_index_on_text_field = False
-    has_case_insensitive_like = False
     create_test_procedure_without_params_sql = """
         CREATE PROCEDURE test_procedure ()
         BEGIN
@@ -59,6 +58,8 @@ class DatabaseFeatures(BaseDatabaseFeatures):
             'non_default': f'{charset}_esperanto_ci',
             'swedish_ci': f'{charset}_swedish_ci',
         }
+
+    test_now_utc_template = 'UTC_TIMESTAMP'
 
     @cached_property
     def django_test_skips(self):
@@ -182,7 +183,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     @cached_property
     def supports_column_check_constraints(self):
         if self.connection.mysql_is_mariadb:
-            return self.connection.mysql_version >= (10, 2, 1)
+            return True
         return self.connection.mysql_version >= (8, 0, 16)
 
     supports_table_check_constraints = property(operator.attrgetter('supports_column_check_constraints'))
@@ -191,7 +192,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     def can_introspect_check_constraints(self):
         if self.connection.mysql_is_mariadb:
             version = self.connection.mysql_version
-            return (version >= (10, 2, 22) and version < (10, 3)) or version >= (10, 3, 10)
+            return version >= (10, 3, 10)
         return self.connection.mysql_version >= (8, 0, 16)
 
     @cached_property
@@ -203,7 +204,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     @cached_property
     def has_select_for_update_nowait(self):
         if self.connection.mysql_is_mariadb:
-            return self.connection.mysql_version >= (10, 3, 0)
+            return True
         return self.connection.mysql_version >= (8, 0, 1)
 
     @cached_property
@@ -242,7 +243,7 @@ class DatabaseFeatures(BaseDatabaseFeatures):
     @cached_property
     def supports_json_field(self):
         if self.connection.mysql_is_mariadb:
-            return self.connection.mysql_version >= (10, 2, 7)
+            return True
         return self.connection.mysql_version >= (5, 7, 8)
 
     @cached_property

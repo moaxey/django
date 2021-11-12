@@ -150,10 +150,10 @@ class Combinable:
 class BaseExpression:
     """Base class for all query expressions."""
 
+    empty_result_set_value = NotImplemented
     # aggregate specific fields
     is_summary = False
     _output_field_resolved_to_none = False
-    empty_aggregate_value = NotImplemented
     # Can the expression be used in a WHERE clause?
     filterable = True
     # Can the expression can be used as a source expression in Window?
@@ -578,7 +578,7 @@ class TemporalSubtraction(CombinedExpression):
         return connection.ops.subtract_temporals(self.lhs.output_field.get_internal_type(), lhs, rhs)
 
 
-@deconstructible
+@deconstructible(path='django.db.models.F')
 class F(Combinable):
     """An object capable of resolving references to existing query objects."""
 
@@ -702,7 +702,13 @@ class Func(SQLiteNumericMixin, Expression):
         sql_parts = []
         params = []
         for arg in self.source_expressions:
-            arg_sql, arg_params = compiler.compile(arg)
+            try:
+                arg_sql, arg_params = compiler.compile(arg)
+            except EmptyResultSet:
+                empty_result_set_value = getattr(arg, 'empty_result_set_value', NotImplemented)
+                if empty_result_set_value is NotImplemented:
+                    raise
+                arg_sql, arg_params = compiler.compile(Value(empty_result_set_value))
             sql_parts.append(arg_sql)
             params.extend(arg_params)
         data = {**self.extra, **extra_context}
@@ -797,7 +803,7 @@ class Value(SQLiteNumericMixin, Expression):
             return fields.UUIDField()
 
     @property
-    def empty_aggregate_value(self):
+    def empty_result_set_value(self):
         return self.value
 
 
@@ -927,7 +933,7 @@ class ExpressionList(Func):
         return self.as_sql(compiler, connection, **extra_context)
 
 
-class ExpressionWrapper(Expression):
+class ExpressionWrapper(SQLiteNumericMixin, Expression):
     """
     An expression that can wrap another expression so that it can provide
     extra context to the inner expression, such as the output_field.
@@ -1026,7 +1032,7 @@ class When(Expression):
         return cols
 
 
-class Case(Expression):
+class Case(SQLiteNumericMixin, Expression):
     """
     An SQL searched CASE expression:
 
@@ -1114,6 +1120,7 @@ class Subquery(BaseExpression, Combinable):
     """
     template = '(%(subquery)s)'
     contains_aggregate = False
+    empty_result_set_value = None
 
     def __init__(self, queryset, output_field=None, **extra):
         # Allow the usage of both QuerySet and sql.Query objects.
